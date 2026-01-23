@@ -27,6 +27,62 @@ from vars import *  # Add this import
 from db import Database
 
 
+def get_mps_and_keys(api_url):
+    """
+    Basic helper used in some flows: expects JSON with mpd_url and keys.
+    """
+    response = requests.get(api_url, timeout=40)
+    response.raise_for_status()
+    response_json = response.json()
+    mpd = response_json.get("mpd_url")
+    keys = response_json.get("keys")
+    return mpd, keys
+
+
+def get_mps_and_keys2(api_url):
+    """
+    Reference-style helper for DRM Classplus/Testbook:
+    the API returns {"mpd_url": "...", "keys": ["KID:KEY", ...]}.
+    """
+    try:
+        response = requests.get(api_url, timeout=40)
+        response.raise_for_status()
+        data = response.json()
+        mpd = data.get("mpd_url")
+        keys = data.get("keys") or []
+        if not mpd or not keys:
+            return None
+        return mpd, keys
+    except Exception as e:
+        logging.error(f"get_mps_and_keys2 failed: {e}")
+        return None
+
+
+def get_mps_and_keys3(url):
+    """
+    Reference-style helper for non-DRM / semi-DRM Classplus JW/Testbook links.
+
+    The reference repos use a helper like this to turn a video URL into an MPD URL
+    via an external backend. Here we keep it simple and expect the backend to
+    return plain text MPD URL.
+    """
+    try:
+        # In the original reference, this was an external service.
+        # Here we assume `url` is already that service endpoint.
+        response = requests.get(url, timeout=40)
+        response.raise_for_status()
+        # Some backends return just text, some JSON. We try text first.
+        text = response.text.strip()
+        if text.startswith("http"):
+            return text
+        data = response.json()
+        mpd = data.get("mpd_url") or data.get("mpd")
+        return mpd
+    except Exception as e:
+        logging.error(f"get_mps_and_keys3 failed: {e}")
+        return None
+
+
 
 def get_duration(filename):
     result = subprocess.run(
