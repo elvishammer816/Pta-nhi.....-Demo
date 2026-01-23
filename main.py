@@ -1182,11 +1182,56 @@ async def text_handler(bot: Client, m: Message):
             elif 'videos.classplusapp' in url:
                 url = requests.get(f'https://api.classplusapp.com/cams/uploader/video/jw-signed-url?url={url}', headers={'x-access-token': f'{cptoken}'}).json()['url']
             
-            elif 'media-cdn.classplusapp.com' in url or 'media-cdn-alisg.classplusapp.com' in url or 'media-cdn-a.classplusapp.com' in url: 
-                headers = {'host': 'api.classplusapp.com', 'x-access-token': f'{cptoken}', 'accept-language': 'EN', 'api-version': '18', 'app-version': '1.4.73.2', 'build-number': '35', 'connection': 'Keep-Alive', 'content-type': 'application/json', 'device-details': 'Xiaomi_Redmi 7_SDK-32', 'device-id': 'c28d3cb16bbdac01', 'region': 'IN', 'user-agent': 'Mobile-Android', 'webengage-luid': '00000187-6fe4-5d41-a530-26186858be4c', 'accept-encoding': 'gzip'}
-                params = {"url": f"{url}"}
-                response = requests.get('https://api.classplusapp.com/cams/uploader/video/jw-signed-url', headers=headers, params=params)
-                url   = response.json()['url']
+            elif ("https://cpvod.testbook.com/" in url) or ("classplusapp.com/drm/" in url):
+                # Map to media-cdn DRM path and ask external key server
+                url = url.replace("https://cpvod.testbook.com/", "https://media-cdn.classplusapp.com/drm/")
+                drm_api = f"https://head-micheline-botupdatevip-f1804c58.koyeb.app/get_keys?url={url}@botupdatevip4u&user_id={m.from_user.id}"
+                result = helper.get_mps_and_keys2(drm_api)
+                if result is None:
+                    await m.reply_text("❌ Token failed. Trying again...")
+                    time.sleep(10)
+                    result = helper.get_mps_and_keys2(drm_api)
+                if result is None:
+                    raise Exception("Failed to obtain DRM keys for Classplus/Testbook URL.")
+                mpd, keys = result
+                url = mpd
+                keys_string = " ".join([f"--key {key}" for key in keys])
+
+            elif 'media-cdn.classplusapp.com' in url or 'media-cdn-alisg.classplusapp.com' in url or 'media-cdn-a.classplusapp.com' in url:
+                # For Classplus media CDN, including /drm/, use external key extractor for DRM
+                if "/drm/" in url or "/cc/" in url or "/lc/" in url or "/tencent/" in url:
+                    drm_api = f"https://head-micheline-botupdatevip-f1804c58.koyeb.app/get_keys?url={url}@botupdatevip4u&user_id={m.from_user.id}"
+                    result = helper.get_mps_and_keys2(drm_api)
+                    if result is None:
+                        await m.reply_text("❌ Token failed. Trying again...")
+                        time.sleep(10)
+                        result = helper.get_mps_and_keys2(drm_api)
+                    if result is None:
+                        raise Exception("Failed to obtain DRM keys for Classplus media CDN URL.")
+                    mpd, keys = result
+                    url = mpd
+                    keys_string = " ".join([f"--key {key}" for key in keys])
+                else:
+                    # Non-DRM path: fall back to JW signed URL as before
+                    headers = {
+                        'host': 'api.classplusapp.com',
+                        'x-access-token': f'{cptoken}',
+                        'accept-language': 'EN',
+                        'api-version': '18',
+                        'app-version': '1.4.73.2',
+                        'build-number': '35',
+                        'connection': 'Keep-Alive',
+                        'content-type': 'application/json',
+                        'device-details': 'Xiaomi_Redmi 7_SDK-32',
+                        'device-id': 'c28d3cb16bbdac01',
+                        'region': 'IN',
+                        'user-agent': 'Mobile-Android',
+                        'webengage-luid': '00000187-6fe4-5d41-a530-26186858be4c',
+                        'accept-encoding': 'gzip'
+                    }
+                    params = {"url": f"{url}"}
+                    response = requests.get('https://api.classplusapp.com/cams/uploader/video/jw-signed-url', headers=headers, params=params)
+                    url = response.json()['url']
 
             elif "childId" in url and "parentId" in url:
                     url = f"https://anonymouspwplayer-0e5a3f512dec.herokuapp.com/pw?url={url}&token={raw_text4}"
@@ -1323,12 +1368,16 @@ async def text_handler(bot: Client, m: Message):
                     await asyncio.sleep(1)  
                     pass
 
-                elif 'drmcdni' in url or 'drm/wv' in url:
+                elif 'drmcdni' in url or 'drm/wv' in url or 'drm/common' in url:
+                    # DRM DASH stream (mpd + keys_string must already be prepared above)
                     Show = f"**⚡Dᴏᴡɴʟᴏᴀᴅɪɴɢ Sᴛᴀʀᴛᴇᴅ...⏳**\n" \
                            f"🖇️ LNK » {url}\n" \
                            f"🎓 Uploaded By » {CREDIT}"
                     prog = await m.reply_text(Show, disable_web_page_preview=True)
-                    res_file = await helper.decrypt_and_merge_video(mpd, keys_string, path, name, raw_text2)
+                    try:
+                        res_file = await helper.decrypt_and_merge_video(mpd, keys_string, path, name, raw_text2)
+                    except NameError:
+                        raise Exception("DRM variables mpd/keys_string not set; key acquisition failed.")
                     filename = res_file
                     await prog.delete(True)
                     await helper.send_vid(bot, m, cc, filename, thumb, name, prog, channel_id, watermark=watermark)
